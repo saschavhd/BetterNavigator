@@ -18,12 +18,18 @@ class Menu():
                  **kwargs):
 
         self._buttons = {
-        '⏪': self.first_page,
-        '◀️': self.previous_page,
-        '▶️': self.next_page,
-        '⏩': self.last_page,
-        '❌': self.stop
+        'navigation': {
+            '⏪': self.first_page,
+            '◀️': self.previous_page,
+            '▶️': self.next_page,
+            '⏩': self.last_page
+        },
+        'general': {
+            '❌': self.stop
         }
+        }
+
+        self._all_buttons = {**self._buttons['navigation'], **self._buttons['general']}
 
         self.bot = bot
 
@@ -31,21 +37,22 @@ class Menu():
         self.channel = channel
 
         self.options = kwargs
+
         self.title = kwargs.get('title', None)
         self.description = kwargs.get('description', None)
-
         self.overwrite_title = kwargs.get('overwrite_title', True)
         self.overwrite_description = kwargs.get('overwrite_description', True)
 
-        if len(pages) == 0:
+        if not pages:
             raise ValueError("Required positional attribute `pages` must have length longer than `0`")
-        self.set_pages(pages=pages)
+        self.update_pages(pages=pages)
 
         self.input = kwargs.get('input', False)
-        self.timeout = kwargs.get('timeout', 60)
 
+        self.timeout = kwargs.get('timeout', 60)
         self.show_page_number = kwargs.get('show_page_number', True)
         self.show_buttons = kwargs.get('show_buttons', True)
+        self.show_general_buttons = kwargs.get('show_general_buttons', True)
         self.remove_reactions_after = kwargs.get('remove_reactions_after', True)
         self.remove_message_after = kwargs.get('remove_message_after', False)
 
@@ -62,10 +69,18 @@ class Menu():
         return self.options
 
     @property
-    def _show_buttons(self):
+    def _show_page_number(self):
         if len(self.pages) == 1:
             return False
-        return self.show_buttons
+        else:
+            return self.show_page_number
+
+    @property
+    def show_nav_buttons(self):
+        if len(self.pages) == 1:
+            return False
+        else:
+            return True
 
     @property
     def current_page(self):
@@ -75,7 +90,7 @@ class Menu():
     def total_pages(self):
         return len(self.pages)
 
-    def set_pages(self, pages: Union[str, Union[list, tuple]]=None):
+    def update_pages(self, pages: Union[str, Union[list, tuple]]=None):
         if pages:
             self.pages = pages
 
@@ -116,7 +131,7 @@ class Menu():
             not self.bot.get_user(payload.user_id).bot and
             payload.message_id == self.message.id and
             payload.user_id in [intor.id for intor in self.interactors] and
-            str(payload.emoji) in self._buttons
+            str(payload.emoji) in self._all_buttons
         )
 
     async def display(self, new: bool=True, reset_position: bool=True) -> tuple:
@@ -145,29 +160,45 @@ class Menu():
         if reset_position:
             self.current_page_number = 1
 
+        if not new and (not self.show_buttons or not self.show_general_buttons or not self.show_nav_buttons):
+            try:
+                await self.message.clear_reactions()
+            except discord.Forbidden:
+                await self.message.delete()
+                new = True
+
+
         # Add footer to current page, send it and save it.
-        page = self.current_page
-        if isinstance(page, EmbeddedPage):
-            embed = page.embed
-            if self.show_page_number:
+        if isinstance(self.current_page, EmbeddedPage):
+            embed = self.current_page.embed
+            if self._show_page_number:
                 embed.set_footer(text=f"Page {self.current_page_number}/{self.total_pages}")
             if self.message and not new:
                 await self.message.edit(embed=embed)
             else:
                 self.message = await self.channel.send(embed=embed)
         else:
-            content = page.content
-            if self.show_page_number:
-                content += f"\n\nPage {self.current_page_number}/{self.total_pages}"
+            content = self.current_page._content
+            if self._show_page_number:
+                if self.current_page.display == 'block':
+                    content = content[:-3] + f"\n\n{' '*20}page {self.current_page_number}/{self.total_pages}"+ content[-3:]
+                else:
+                    content += f"\n\n{' '*20}page {self.current_page_number}/{self.total_pages}"
+
             if self.message and not new:
                 await self.message.edit(content=content)
             else:
                 self.message = await self.channel.send(content=content)
 
         # Add buttons to message
-        if self._show_buttons:
-            for button in self._buttons:
-                await self.message.add_reaction(button)
+        if self.show_buttons:
+            if self.show_nav_buttons:
+                for button in self._buttons['navigation']:
+                    await self.message.add_reaction(button)
+
+            if self.show_general_buttons:
+                for button in self._buttons['general']:
+                    await self.message.add_reaction(button)
 
         # Start main interaction loop
         try:
@@ -201,7 +232,7 @@ class Menu():
                 payload = done.pop().result()
 
                 try:
-                    await self._buttons[str(payload.emoji)]()
+                    await self._all_buttons[str(payload.emoji)]()
                 except KeyError:
                     pass
                 except AttributeError:
@@ -263,13 +294,16 @@ class Menu():
             await func(self, *args)
             if isinstance(self.current_page, EmbeddedPage):
                 embed = self.current_page.embed
-                if self.show_page_number:
-                    embed.set_footer(text=f"Page {self.current_page_number}/{self.total_pages}")
+                if self._show_page_number:
+                    embed.set_footer(text=f"{' '*20}page {self.current_page_number}/{self.total_pages}")
                 await self.message.edit(embed=embed, content="")
             else:
-                content = self.current_page.content
-                if self.show_page_number:
-                    content += f"\n\nPage {self.current_page_number}/{self.total_pages}"
+                content = self.current_page._content
+                if self._show_page_number:
+                    if self.current_page.display == 'block':
+                        content = content[:-3] + f"\n\n{' '*20}page {self.current_page_number}/{self.total_pages}"+ content[-3:]
+                    else:
+                        content += f"\n\n{' '*20}page {self.current_page_number}/{self.total_pages}"
                 await self.message.edit(content=content, embed=None)
         return wrapper
 
@@ -311,48 +345,60 @@ class Page():
                 content: Union[str, Union[list, tuple]],
                 **kwargs):
 
-        # Constants
+        # Class handled
         self._list_emojis = {
         'numbers': [':zero:', ':one:', ':two:', ':three:',
                     ':four:', ':five:', ':six:', ':seven:',
                     ':eight:', ':nine:']
         }
 
-        self._raw_content = content
+        # User input
+        self.content = content
 
-        self.engrave = kwargs.get('engrave_content', None)
+        self.options = kwargs
+
+        self.display = kwargs.get('display', 'line')
         self.title = kwargs.get('title', None)
         self.description = kwargs.get('description', None)
+
+        self.prefix = kwargs.get('prefix', '')
+        self.enumerate = kwargs.get('enumerate', False)
+        self.enumerate_with_emoji = kwargs.get('enumerate_with_emoji', False)
 
         if isinstance(content, str):
             self.enlisted = False
 
         elif isinstance(content, (list, tuple)):
             self.enlisted = True
-            self.enumerate = kwargs.get('enumerate', False)
-            self.enumerate_with_emoji = kwargs.get('enumerate_with_emoji', False)
-            if self.enumerate_with_emoji:
-                self.prefix = [f"{self._get_emoji_number(itr+1)} " for itr in range(len(content))]
-            elif self.enumerate:
-                self.prefix = [f"{itr+1} " for itr in range(len(content))]
-            else:
-                prefix = kwargs.get('prefix', '')
-                self.prefix = [f"{prefix}{' ' * (prefix != '')}"] * len(content)
+
         else:
             raise TypeError("Required attribute content must be of type string, ",
             f"list or tuple. Not {type(content)}")
 
     def __str__(self):
+        if self.display == 'block' and self.enumerate_with_emoji:
+            print("Warning: cannot display emojis when keyword attribute `display` is set to 'block'.")
+
         if self.enlisted:
-            return ''.join([f"{self.prefix[itr]}{entry}\n" for itr, entry in enumerate(self._raw_content)]).rstrip()
+            return ''.join([f"{self._prefix[itr]}{entry}\n" for itr, entry in enumerate(self.content)]).rstrip()
         else:
-            return self._raw_content
+            return self.content
 
     def __len__(self):
-        return len(self.content)
+        return len(self._content)
 
     @property
-    def content(self):
+    def _prefix(self):
+        if self.enumerate_with_emoji:
+            if self.display != 'block':
+                return [f"{self._get_emoji_number(itr+1)} " for itr in range(len(self.content))]
+        if self.enumerate or self.enumerate_with_emoji:
+            return [f"{itr+1} " for itr in range(len(self.content))]
+        else:
+            return [f"{self.prefix}{' ' * (self.prefix != '')}"] * len(self.content)
+
+    @property
+    def _content(self):
         head = ""
         if self.title:
             head += f"{self.title}\n"
@@ -360,7 +406,11 @@ class Page():
             head += f"*{self.description}*\n"
         if self.title or self.description:
             head += "\n"
-        return head + str(self)
+        content = head + str(self)
+        if self.display == 'block':
+            content = f"```{content}```"
+
+        return content
 
     def _get_emoji_number(self, number: int) -> str:
         '''
@@ -443,8 +493,8 @@ class EmbeddedPage(Page):
             embed.set_image(url=self.image)
 
         if self.using_fields:
-            for itr, entry in enumerate(self._raw_content):
-                embed.add_field(name=self.prefix[itr], value=entry)
+            for itr, entry in enumerate(self.content):
+                embed.add_field(name=self._prefix[itr], value=entry)
         else:
             embed.description += f"\n\n{str(self)}"
 
