@@ -2,7 +2,7 @@ import asyncio
 import discord
 from discord.ext import commands
 from typing import Union, Optional
-
+from utils.page import Page, EmbeddedPage
 
 # Minimum needed permissions:
 # View whatever needed channel
@@ -18,15 +18,15 @@ class Menu():
                  **kwargs):
 
         self._buttons = {
-        'navigation': {
-            '⏪': self.first_page,
-            '◀️': self.previous_page,
-            '▶️': self.next_page,
-            '⏩': self.last_page
-        },
-        'general': {
-            '❌': self.stop
-        }
+            'navigation': {
+                '⏪': self.first_page,
+                '◀️': self.previous_page,
+                '▶️': self.next_page,
+                '⏩': self.last_page
+            },
+            'general': {
+                '❌': self.stop
+            }
         }
 
         self._all_buttons = {**self._buttons['navigation'], **self._buttons['general']}
@@ -38,16 +38,25 @@ class Menu():
 
         self.options = kwargs
 
-        self.title = kwargs.get('title', None)
-        self.description = kwargs.get('description', None)
-        self.overwrite_title = kwargs.get('overwrite_title', True)
-        self.overwrite_description = kwargs.get('overwrite_description', True)
+        # Page settings
+        self.title = kwargs.get('title', '')
+        self.overwrite_title = kwargs.get('overwrite_title', False)
+        self.fill_title = kwargs.get('fill_title', '')
 
-        if not pages:
-            raise ValueError("Required positional attribute `pages` must have length longer than `0`")
-        self.update_pages(pages=pages)
+        self.description = kwargs.get('description', '')
+        self.overwrite_description = kwargs.get('overwrite_description', False)
+        self.fill_description = kwargs.get('fill_description', False)
+
+        self.footer = kwargs.get('footer', '')
+        self.overwrite_footer = kwargs.get('overwrite_footer', False)
+        self.fill_footer = kwargs.get('fill_footer', False)
+
+        self.all_embedded = kwargs.get('all_embedded', False)
+
+        self.update(pages=pages)
 
         self.input = kwargs.get('input', False)
+        self.reaction_input = kwargs.get('reaction_input', False)
 
         self.timeout = kwargs.get('timeout', 60)
         self.show_page_number = kwargs.get('show_page_number', True)
@@ -60,57 +69,106 @@ class Menu():
         self._running = False
         self.message = None
 
-        self._check_message_lengths()
+    @property
+    def current_page(self) -> Page:
+        return self.pages[self.current_page_number-1]
 
     @property
-    def page_options(self):
+    def total_pages(self) -> int:
+        return len(self.pages)
+
+    @property
+    def _page_options(self) -> dict:
         self.options['title'] = self.title
         self.options['description'] = self.description
+        self.options['footer'] = self.footer
         return self.options
 
     @property
-    def _show_page_number(self):
+    def _show_page_number(self) -> bool:
         if len(self.pages) == 1:
             return False
         else:
             return self.show_page_number
 
     @property
-    def show_nav_buttons(self):
+    def _show_nav_buttons(self) -> bool:
         if len(self.pages) == 1:
             return False
         else:
             return True
 
     @property
-    def current_page(self):
-        return self.pages[self.current_page_number-1]
+    def _footer(self) -> str:
+        footer = ""
+        if self.current_page.footer:
+            footer = f"{self.current_page.footer}"
+        if self.current_page.footer and self._show_page_number:
+            footer += " | "
+        if self._show_page_number:
+            footer += f"page {self.current_page_number}/{self.total_pages}"
+        return footer
 
     @property
-    def total_pages(self):
-        return len(self.pages)
+    def current_embed(self) -> discord.Embed:
+        try:
+            embed = self.current_page.embed
+        except AttributeError:
+            return None
+        else:
+            if self.current_page_footer:
+                embed.set_footer(text=self.current_page_footer)
+            return embed
 
-    def update_pages(self, pages: Union[str, Union[list, tuple]]=None):
+    @property
+    def current_content(self) -> str:
+        try:
+            content = self.current_page._content
+        except AttributeError:
+            return None
+        else:
+            if self._footer:
+                if self.current_page.display == 'block':
+                    content = content[:-3] + f"\n\n{self._footer}" + content[-3:]
+                else:
+                    content += f"\n\n{self._footer}"
+            return content
+
+    def update_page(self, page: Union[Page, str, list, tuple]):
+        if isinstance(page, Page):
+            if self.overwrite_title:
+                page.title = self.title
+            elif not page.title and self.fill_title:
+                page.title = self.title
+
+            if self.overwrite_description:
+                page.description = self.description
+            elif not page.description and self.fill_description:
+                page.description = self.description
+
+            if self.overwrite_footer:
+                page.footer = self.footer
+            elif not page.footer and self.fill_footer:
+                page.footer = self.footer
+
+            if self.options['enumerate_with_emoji'] and page.enlisted:
+                page.enumerate_with_emoji = True
+
+        elif isinstance(page, (str, list, tuple)):
+            if self.all_embedded:
+                page = EmbeddedPage(content=page, **self._page_options)
+            else:
+                page = Page(content=page, **self._page_options)
+        else:
+            raise TypeError("Items in required attribute `pages` must all be of type Page, str, list or tuple")
+        return page
+
+    def update(self, pages: Union[list, tuple]=None):
         if pages:
             self.pages = pages
 
         for itr, page in enumerate(self.pages):
-            if isinstance(page, Page):
-                if self.title and self.overwrite_title:
-                    self.pages[itr].title = self.title
-                elif self.title and not page.title:
-                    self.pages[itr].title = self.title
-
-                if self.overwrite_description:
-                    self.pages[itr].description = self.description
-
-            elif isinstance(page, (str, list, tuple)):
-                if self.options.get('all_embedded', False):
-                    self.pages[itr] = EmbeddedPage(page, **self.page_options)
-                else:
-                    self.pages[itr] = Page(page, **self.page_options)
-            else:
-                raise TypeError("Items in required attribute `pages` must all be of type Page, str, list or tuple")
+            self.pages[itr] = self.update_page(page)
 
     def _check(self, payload: discord.RawReactionActionEvent) -> bool:
         '''
@@ -139,60 +197,53 @@ class Menu():
         Creates message and starts interactive navigation
 
         Parameters:
-        ----------
+        -----------
             new: :class:`bool`
                 Whether to make a new message or continue on the old one.
                 If no old message exists a new one will be created regardless.
+
+            reset_positon: :class:`bool`
+                Whether to start from page 1 or from the last saved page number.
 
         Returns:
         --------
             :class:`tuple`:
                 self.current_page: :class:`Page`
-                    Page the input was done on.
-                message: :class:`discord.Message`
-                    Wanted input message
+                    Page at the time of receiving correct input
+
+                Union:
+                    message: :class:`discord.Message`
+                        User input message
+                    reaction :class:`discord.RawReactionActionEvent`
+                        User reaction input payload
         '''
 
+        # Check if message
         if not self.message and not new:
-            raise RuntimeError("Cannot continue if message was never created. ",
+            raise RuntimeError("Cannot continue if message was deleted or never created. ",
                                " (Set `new` to True or leave it default)")
 
         if reset_position:
             self.current_page_number = 1
 
-        if not new and (not self.show_buttons or not self.show_general_buttons or not self.show_nav_buttons):
+        if not new and (not self.show_buttons or
+                        not self.show_general_buttons or
+                        not self._show_nav_buttons):
             try:
                 await self.message.clear_reactions()
             except discord.Forbidden:
                 await self.message.delete()
                 new = True
 
-
-        # Add footer to current page, send it and save it.
-        if isinstance(self.current_page, EmbeddedPage):
-            embed = self.current_page.embed
-            if self._show_page_number:
-                embed.set_footer(text=f"Page {self.current_page_number}/{self.total_pages}")
-            if self.message and not new:
-                await self.message.edit(embed=embed)
-            else:
-                self.message = await self.channel.send(embed=embed)
+        content, embed = self.current_content, self.current_embed
+        if new:
+            self.message = await self.channel.send(content=content, embed=embed)
         else:
-            content = self.current_page._content
-            if self._show_page_number:
-                if self.current_page.display == 'block':
-                    content = content[:-3] + f"\n\n{' '*20}page {self.current_page_number}/{self.total_pages}"+ content[-3:]
-                else:
-                    content += f"\n\n{' '*20}page {self.current_page_number}/{self.total_pages}"
-
-            if self.message and not new:
-                await self.message.edit(content=content)
-            else:
-                self.message = await self.channel.send(content=content)
+            await self.message.edit(content=content, embed=embed)
 
         # Add buttons to message
         if self.show_buttons:
-            if self.show_nav_buttons:
+            if self._show_nav_buttons:
                 for button in self._buttons['navigation']:
                     await self.message.add_reaction(button)
 
@@ -214,8 +265,13 @@ class Menu():
 
                 if self.input:
                     tasks.append(
-                    asyncio.create_task(self.bot.wait_for('message', check=self.input))
+                        asyncio.create_task(self.bot.wait_for('message', check=self.input))
                     )
+
+                if self.reaction_input:
+                    tasks.append(
+                        asyncio.create_task(self.bot.wait_for('raw_reaction_add', check=self.reaction_input)
+                    ))
 
                 done, pending = await asyncio.wait(
                     tasks,
@@ -232,13 +288,17 @@ class Menu():
                 payload = done.pop().result()
 
                 try:
-                    await self._all_buttons[str(payload.emoji)]()
-                except KeyError:
-                    pass
+                    emoji = payload.emoji
                 except AttributeError:
                     pass
                 else:
-                    continue
+                    try:
+                        await self._all_buttons[str(emoji)]()
+                    except KeyError:
+                        pass
+
+                    if self.reaction_input:
+                        return (payload, self.current_page)
 
                 try:
                     message_content = payload.content
@@ -255,57 +315,35 @@ class Menu():
                 task.cancel()
 
     async def stop(self):
-        '''
-        Stops interactive navigation
-
-        Check whether to remove the message or its reactions
-        '''
-
         self._running = False
-
-        try:
-            if self.remove_message_after:
+        if self.remove_mesage_after:
+            try:
                 await self.message.delete()
-        except discord.Forbidden:
-            pass
+            except discord.NotFound:
+                return
 
-        try:
-            if self.remove_reactions_after:
+        if self.remove_reactions_after:
+            try:
                 await self.message.clear_reactions()
-        except discord.Forbidden:
-            pass
-        except discord.NotFound:
-            pass
+            except discord.NotFound:
+                return
+            except discord.Forbidden:
+                pass
 
-    def _check_message_lengths(self):
-        for i in range(1, self.total_pages):
-            if isinstance(self.current_page, EmbeddedPage):
-                self.current_page = page.embed
-                if (len(embed) > 6000 or len(embed.description) > 2048):
-                    raise ValueError("Embed size and it's description may not exceed 6000 and 2048 characters respectively.")
-            elif len(self.current_page) > 2000:
-                    raise ValueError("Message size may not exceed 2000 characters.")
-            self.current_page_number += 1
-        self.current_page_number = 1
 
     def update_message(func):
         '''Decorator to update the message'''
-        async def wrapper(self, *args):
-            await func(self, *args)
-            if isinstance(self.current_page, EmbeddedPage):
-                embed = self.current_page.embed
-                if self._show_page_number:
-                    embed.set_footer(text=f"{' '*20}page {self.current_page_number}/{self.total_pages}")
-                await self.message.edit(embed=embed, content="")
-            else:
-                content = self.current_page._content
-                if self._show_page_number:
-                    if self.current_page.display == 'block':
-                        content = content[:-3] + f"\n\n{' '*20}page {self.current_page_number}/{self.total_pages}"+ content[-3:]
-                    else:
-                        content += f"\n\n{' '*20}page {self.current_page_number}/{self.total_pages}"
-                await self.message.edit(content=content, embed=None)
-        return wrapper
+        async def update_message_wrapper(self):
+            await func(self)
+            try:
+                await self.message.edit(content=self.current_content, embed=self.current_embed)
+            except discord.NotFound:
+                raise discord.NotFound("Message was deleted or never created!")
+        return update_message_wrapper
+
+    @update_message
+    async def add_page(self, page: Union[Page, str, list, tuple], position: int=0):
+        self.pages.insert(position-1, self.update_page(page))
 
     @update_message
     async def first_page(self):
@@ -338,164 +376,3 @@ class Menu():
             raise ValueError(f"page_number must be between 1 and total_pages ({self.total_pages})")
         else:
             self.current_page_number = page_number
-
-
-class Page():
-    def __init__(self,
-                content: Union[str, Union[list, tuple]],
-                **kwargs):
-
-        # Class handled
-        self._list_emojis = {
-        'numbers': [':zero:', ':one:', ':two:', ':three:',
-                    ':four:', ':five:', ':six:', ':seven:',
-                    ':eight:', ':nine:']
-        }
-
-        # User input
-        self.content = content
-
-        self.options = kwargs
-
-        self.display = kwargs.get('display', 'line')
-        self.title = kwargs.get('title', None)
-        self.description = kwargs.get('description', None)
-
-        self.prefix = kwargs.get('prefix', '')
-        self.enumerate = kwargs.get('enumerate', False)
-        self.enumerate_with_emoji = kwargs.get('enumerate_with_emoji', False)
-
-        if isinstance(content, str):
-            self.enlisted = False
-
-        elif isinstance(content, (list, tuple)):
-            self.enlisted = True
-
-        else:
-            raise TypeError("Required attribute content must be of type string, ",
-            f"list or tuple. Not {type(content)}")
-
-    def __str__(self):
-        if self.display == 'block' and self.enumerate_with_emoji:
-            print("Warning: cannot display emojis when keyword attribute `display` is set to 'block'.")
-
-        if self.enlisted:
-            return ''.join([f"{self._prefix[itr]}{entry}\n" for itr, entry in enumerate(self.content)]).rstrip()
-        else:
-            return self.content
-
-    def __len__(self):
-        return len(self._content)
-
-    @property
-    def _prefix(self):
-        if self.enumerate_with_emoji:
-            if self.display != 'block':
-                return [f"{self._get_emoji_number(itr+1)} " for itr in range(len(self.content))]
-        if self.enumerate or self.enumerate_with_emoji:
-            return [f"{itr+1} " for itr in range(len(self.content))]
-        else:
-            return [f"{self.prefix}{' ' * (self.prefix != '')}"] * len(self.content)
-
-    @property
-    def _content(self):
-        head = ""
-        if self.title:
-            head += f"{self.title}\n"
-        if self.description:
-            head += f"*{self.description}*\n"
-        if self.title or self.description:
-            head += "\n"
-        content = head + str(self)
-        if self.display == 'block':
-            content = f"```{content}```"
-
-        return content
-
-    def _get_emoji_number(self, number: int) -> str:
-        '''
-        Turns postive integer into discord emoji
-
-        Parameters:
-        -----------
-            number: :class:`int`
-                Integer to convert to emoji string
-
-        Returns:
-        --------
-            emoji_number: :class:`str`
-                (Combined) string version of the integer
-        '''
-
-        if number < 0:
-            raise NotImplementedError("Method _get_emoji_number does not yet ",
-            "convert negative integers.")
-
-        emoji_number = ''
-        for char in str(number):
-            emoji_number += f"{self._list_emojis['numbers'][int(char)]}"
-        return emoji_number
-
-
-class EmbeddedPage(Page):
-    def __init__(self,
-                content: Union[str, Union[list, tuple]],
-                title: str,
-                description: str,
-                **kwargs):
-        super().__init__(content, title=title, description=description, **kwargs)
-
-        self.using_fields = kwargs.get('using_fields', False)
-        if self.using_fields:
-            if not isinstance(content, (list, tuple)):
-                raise TypeError(
-                "When optional keyword attribute `using_fields` is set to true ",
-                "required attribute `content` must be of type list or tuple.",
-                f"Not {type(content)}")
-            self.enlisted = True
-
-        self.author = kwargs.get('author', None)
-        self.timestamp = kwargs.get('timestamp', None)
-
-        try:
-            self.image = kwargs['image_url']
-        except KeyError:
-            self.image = kwargs.get('image', None)
-
-        try:
-            self.thumbnail = kwargs['thumnail_url']
-        except KeyError:
-            self.thumbnail = kwargs.get('thumbnail', None)
-
-        try:
-            self.colour = kwargs['color']
-        except KeyError:
-            self.colour = kwargs.get('colour', discord.Colour.default())
-
-    @property
-    def embed(self):
-        embed = discord.Embed(
-        title=f"{self.title}",
-        description=f"*{self.description}*",
-        colour=self.colour
-        )
-
-        if self.timestamp:
-            embed.timestamp = self.timestamp
-
-        if self.author:
-            emed.set_author(name=self.author)
-
-        if self.thumbnail:
-            embed.set_thumbnail(url=self.thumbnail)
-
-        if self.image:
-            embed.set_image(url=self.image)
-
-        if self.using_fields:
-            for itr, entry in enumerate(self.content):
-                embed.add_field(name=self._prefix[itr], value=entry)
-        else:
-            embed.description += f"\n\n{str(self)}"
-
-        return embed
