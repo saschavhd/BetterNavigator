@@ -2,7 +2,7 @@ import asyncio
 import discord
 from discord.ext import commands
 from typing import Union, Optional
-from utils.page import Page, EmbeddedPage
+from page import Page, EmbeddedPage
 
 # Minimum needed permissions:
 # View whatever needed channel
