@@ -5,6 +5,39 @@ from typing import Union, Optional
 
 
 class Page():
+    '''
+    A class to handle the formatting of message information
+    This class is only used as a supplement to Menu.
+
+    Attributes:
+    -----------
+        All attributes are optional, however if the right combination of optional
+        arguments is not met, the page might not be able to display information properly.
+
+        content: :class:`Union[str, list[str]]`
+            Either a string or sequence of strings to represent the page content.
+            If a list is passed through this will set `enlisted` to True.
+        title: :class:`str`
+            The title of the page, will be bold by default.
+        description: :class:`description`
+            The description of the page, will be cursive by default.
+        footer: :class:`footer`
+            The footer of the page, note that in a menu object the page number
+            will always be added to this footer.
+
+        prefix: :class:`str`
+            When enlisted is set to true the `prefix` will be used as a list character.
+        enumerate: :class:`bool`
+            Whether to number the enlisted content, overwrites any set prefix.
+        enumerate_with_emoji: :class:`bool`
+            Whether to number the enlisted content with an emoji (e.g. :one:).
+            This overwrite both prefix and enumerate.
+
+        display: :class:`str`
+            How to display the content, by default it is set to line, which
+            looks like normal discord message. However this attribute can be set
+            to block to "engrave" the content
+    '''
     def __init__(self, **kwargs):
 
         # Class handled
@@ -18,6 +51,14 @@ class Page():
         self.options = kwargs
 
         self.content = kwargs.get('content', '')
+        if isinstance(self.content, str):
+            self.enlisted = False
+        elif isinstance(self.content, list):
+            self.enlisted = True
+        else:
+            raise TypeError("Required attribute content must be of type string ",
+            f"or list. Not {type(self.content)}")
+
         self.title = kwargs.get('title', '')
         self.description = kwargs.get('description', '')
         self.footer = kwargs.get('footer', '')
@@ -30,16 +71,6 @@ class Page():
         self.enumerate_with_emoji = kwargs.get('enumerate_with_emoji', False)
 
         self.display = kwargs.get('display', 'line')
-
-        if isinstance(self.content, str):
-            self.enlisted = False
-
-        elif isinstance(self.content, (list, tuple)):
-            self.enlisted = True
-
-        else:
-            raise TypeError("Required attribute content must be of type string, ",
-            f"list or tuple. Not {type(content)}")
 
     def __str__(self):
         if not self.content:
@@ -57,17 +88,19 @@ class Page():
         return len(self._content)
 
     @property
-    def _prefix(self):
+    def _prefix(self) -> list[str]:
         if self.enumerate_with_emoji:
             if self.display != 'block':
                 return [f"{self._get_emoji_number(itr+1)} " for itr in range(len(self.content))]
         if self.enumerate or self.enumerate_with_emoji:
             return [f"{itr+1} " for itr in range(len(self.content))]
+        elif isinstance(self.prefix, list):
+            return self.prefix
         else:
             return [f"{self.prefix}{' ' * (self.prefix != '')}"] * len(self.content)
 
     @property
-    def _content(self):
+    def _content(self) -> str:
         head = ""
         if self.title:
             head += f"**{self.title}**\n"
@@ -109,20 +142,29 @@ class Page():
 
 
 class EmbeddedPage(Page):
+    '''
+    A subclass of page, inheriting it's content properties.
+    The additional keyword arguments for this class are just passthrough
+    arguments of a discord.Embed object.
+    See here for more information:
+        https://discordpy.readthedocs.io/en/latest/api.html?#discord.Embed
+    '''
+
     def __init__(self, title: str, **kwargs):
         super().__init__(title=title, **kwargs)
 
         self.using_fields = kwargs.get('using_fields', False)
         if self.using_fields:
-            if not isinstance(self.content, (list, tuple)):
+            if not isinstance(self.content, list):
                 raise TypeError(
                 "When optional keyword attribute `using_fields` is set to true ",
-                "required attribute `content` must be of type list or tuple.",
-                f"Not {type(content)}.")
+                "required attribute `content` must be of type list.",
+                f"Not {type(self.content)}.")
             self.enlisted = True
 
         self.author = kwargs.get('author', None)
         self.timestamp = kwargs.get('timestamp', None)
+        self.inline = kwargs.get('inline', False)
 
         try:
             self.image = kwargs['image_url']
@@ -140,23 +182,25 @@ class EmbeddedPage(Page):
             self.colour = kwargs.get('colour', discord.Colour.default())
 
     @property
-    def embed(self):
+    def embed(self) -> discord.Embed:
         embed = discord.Embed(
             title=f"{self.title}",
             colour=self.colour
         )
 
-        if self.description:
-            embed.description = f"*{self.description}*"
+        if self.description: embed.description = f"*{self.description}*"
 
         if self.content:
             if self.using_fields:
                 for itr, entry in enumerate(self.content):
-                    embed.add_field(name=self._prefix[itr], value=entry)
+                    embed.add_field(name=self._prefix[itr], value=entry, inline=self.inline)
             else:
                 embed.description += f"\n\n{str(self)}"
 
-        if self.footer:
-            embed.set_footer(text=self.footer)
+        if self.footer: embed.set_footer(text=self.footer)
+
+        if self.image: embed.set_image(url=self.image)
+
+        if self.thumbnail: embed.set_thumbnail(url=self.thumbnail)
 
         return embed
