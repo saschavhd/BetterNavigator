@@ -39,32 +39,18 @@ class Menu():
 
         Page Formatting Attributes:
         ------------------------
-        title: :class:`str`
-            The menu's default title that might be inherited.
-        overwrite_title: :class:`bool`
-            Whether to overwrite individually set page titles.
-        fill_title: :class:`bool`
-            Whether to fill the default title to pages that have no title
+        page_options: :class:`dict`
+            A dictionary containing the formatting for the pages in the menu.
 
-        description: :class:`str`
-            The menu's default description that might be inherited.
-        overwrite_description: :class:`bool`
-            Whether to overwrite individually set page descriptions.
-        fill_title: :class:`bool`
-            Whether to fill the default description to pages that have none
+        overwrite_page_options: :class:`bool`
+            Whether to overwrite all page formatting with "page_options".
+            This means change them regardless of whether they have the attributes.
+        fill_page_options: :class:`bool`
+            Whether to fill all page formatting with "page_options".
+            This means adding the attribute if they don't have it yet.
 
-        footer: :class:`str`
-            The menu's default footer that might be inherited.
-        overwrite_footer: :class:`bool`
-            Whether to overwrite indivually set page footers.
-        fill_footer: :class:`bool`
-            Whether to fill the default footer to pages that have no footer.
-
-        overwrite_all: :class:`bool`
-            Whether to overwrite all default menu information, not overwritten
-            individually.
-        fill_all: :class:`bool`
-            Whether to fill all default menu information. Overwritten indiviually.
+        all_embedded: :class:`bool`
+            Whether all pages created by the menu itself will be embeds.
 
         Input Attributes:
         -----------------
@@ -108,27 +94,12 @@ class Menu():
         self.interactors = interactors
         self.channel = channel
 
-        # Collection of keyword arguments
-        self.options = kwargs
-
         # Page options
-        self.title = kwargs.get('title', '')
-        self.overwrite_title = kwargs.get('overwrite_title', False)
-        self.fill_title = kwargs.get('fill_title', True)
+        self.page_options = kwargs
 
-        self.description = kwargs.get('description', '')
-        self.overwrite_description = kwargs.get('overwrite_description', False)
-        self.fill_description = kwargs.get('fill_description', True)
+        self.overwrite_page_options = kwargs.get('overwrite_all', False)
+        self.fill_page_options = kwargs.get('fill_all', True)
 
-        self.footer = kwargs.get('footer', '')
-        self.overwrite_footer = kwargs.get('overwrite_footer', False)
-        self.fill_footer = kwargs.get('fill_footer', True)
-
-        self.overwrite_all = kwargs.get('overwrite_all', False)
-        self.fill_all = kwargs.get('fill_all', True)
-
-        self.enumerate = kwargs.get('enumerate', False)
-        self.enumerate_with_emoji = kwargs.get('enumerate_with_emoji', False)
         self.all_embedded = kwargs.get('all_embedded', False)
 
         self.update(pages=pages)
@@ -173,13 +144,6 @@ class Menu():
         return len(self.pages)
 
     @property
-    def _page_options(self) -> dict:
-        self.options['title'] = self.title
-        self.options['description'] = self.description
-        self.options['footer'] = self.footer
-        return self.options
-
-    @property
     def _show_page_number(self) -> bool:
         if len(self.pages) == 1:
             return False
@@ -205,30 +169,6 @@ class Menu():
         return footer
 
     @property
-    def _overwrite_title(self) -> bool:
-        return (self.overwrite_title or self.overwrite_all)
-
-    @property
-    def _fill_title(self) -> bool:
-        return (self.fill_title and self.fill_all)
-
-    @property
-    def _overwrite_description(self) -> bool:
-        return (self.overwrite_description or self.overwrite_all)
-
-    @property
-    def _fill_description(self) -> bool:
-        return (self.fill_description and self.fill_all)
-
-    @property
-    def _overwrite_footer(self) -> bool:
-        return (self.overwrite_footer or self.overwrite_all)
-
-    @property
-    def _fill_footer(self) -> bool:
-        return (self.fill_footer and self.fill_all)
-
-    @property
     def current_embed(self) -> discord.Embed:
         if isinstance(self.current_page, EmbeddedPage):
             embed = self.current_page.embed
@@ -246,9 +186,9 @@ class Menu():
             content = self.current_page._content
             if self._footer:
                 if self.current_page.display == 'block':
-                    content = content[:-3] + f"\n\n{self._footer}" + content[-3:]
+                    content = content[:-3] + f"\n\n*{self._footer}*" + content[-3:]
                 else:
-                    content += f"\n\n{self._footer}"
+                    content += f"\n\n*{self._footer}*"
             return content
 
     def update_page(self, page: Union[Page, str, list[str]]):
@@ -268,37 +208,29 @@ class Menu():
         '''
 
         if isinstance(page, Page):
-            if self._overwrite_title:
-                page.title = self.title
-            elif not page.title and self.fill_title:
-                page.title = self.title
+            for attribute, value in self.page_options.items():
+                if self.overwrite_page_options:
+                    try:
+                        setattr(page, attribute, value)
+                    except AttributeError:
+                        pass
+                elif self.fill_page_options:
+                    try:
+                        if not getattr(page, attribute, value):
+                            setattr(page, attribute, value)
+                    except AttributeError:
+                        pass
 
-            if self._overwrite_description:
-                page.description = self.description
-            elif not page.description and self.fill_description:
-                page.description = self.description
-
-            if self._overwrite_footer:
-                page.footer = self.footer
-            elif not page.footer and self.fill_footer:
-                page.footer = self.footer
-
-            if page.enlisted:
-                if self.enumerate_with_emoji:
-                    page.enumerate_with_emoji = True
-                elif self.enumerate:
-                    page.enumerate = True
-
-        elif isinstance(page, (str, list[str])):
+        elif isinstance(page, (str, list)):
             if self.all_embedded:
-                page = EmbeddedPage(content=page, **self._page_options)
+                page = EmbeddedPage(content=page, **self.page_options)
             else:
-                page = Page(content=page, **self._page_options)
+                page = Page(content=page, **self.page_options)
         else:
-            raise TypeError("Items in required attribute `pages` must all be of type Page, str, list or tuple")
+            raise TypeError("Items in required attribute `pages` must all be of type Page, str or list.")
         return page
 
-    def update(self, pages: Union[list[Page, str, list]]=None):
+    def update(self, pages: Union[list[Page, str, list[str]]]=None):
         '''
         Updates all pages in the menu, if keyword argument `pages` is
         given then the menu's current pages will be overwritten by it.
@@ -470,15 +402,17 @@ class Menu():
                         await self._all_buttons[str(emoji)]()
                     except KeyError:
                         pass
+                    else:
+                        continue
 
                     if self.reaction_input:
                         return (payload, self.current_page)
 
-                    if str(payload.emoji) in self.selectors:
+                    if str(emoji) in self.selectors:
                         return (payload, self.current_page)
 
                     user = self.bot.get_user(payload.user_id)
-                    message.remove_reaction(payload.emoji, user)
+                    message.remove_reaction(emoji, user)
 
                 try:
                     message_content = payload.content
@@ -518,7 +452,7 @@ class Menu():
                 await self.message.edit(content=self.current_content, embed=self.current_embed)
             except discord.NotFound:
                 raise discord.NotFound("Message was deleted or never created!")
-                return update_message_wrapper
+        return update_message_wrapper
 
     @update_message
     async def add_page(self, page: Union[Page, str, list[str]], position: int=None):

@@ -1,7 +1,7 @@
 import asyncio
 import discord
 from discord.ext import commands
-from typing import Union, Optional
+from typing import Union
 
 
 class Page():
@@ -36,20 +36,11 @@ class Page():
         display: :class:`str`
             How to display the content, by default it is set to line, which
             looks like normal discord message. However this attribute can be set
-            to block to "engrave" the content
+            to block to "engrave" (```{content}```) the content.
     '''
     def __init__(self, **kwargs):
 
-        # Class handled
-        self._list_emojis = {
-        'numbers': [':zero:', ':one:', ':two:', ':three:',
-                    ':four:', ':five:', ':six:', ':seven:',
-                    ':eight:', ':nine:']
-        }
-
-        # User input
-        self.options = kwargs
-
+        # Content handling
         self.content = kwargs.get('content', '')
         if isinstance(self.content, str):
             self.enlisted = False
@@ -59,18 +50,29 @@ class Page():
             raise TypeError("Required attribute content must be of type string ",
             f"or list. Not {type(self.content)}")
 
+        # Header and footer information
         self.title = kwargs.get('title', '')
         self.description = kwargs.get('description', '')
         self.footer = kwargs.get('footer', '')
 
+        # Check if page not empty
         if not self.content and not self.title and not self.description:
             raise RuntimeError("Page is completely empty.")
 
+        # List formatting options
         self.prefix = kwargs.get('prefix', '')
         self.enumerate = kwargs.get('enumerate', False)
         self.enumerate_with_emoji = kwargs.get('enumerate_with_emoji', False)
 
+        # Text formatting options
         self.display = kwargs.get('display', 'line')
+
+        # Class handled
+        self._list_emojis = {
+        'numbers': [':zero:', ':one:', ':two:', ':three:',
+                    ':four:', ':five:', ':six:', ':seven:',
+                    ':eight:', ':nine:']
+        }
 
     def __str__(self):
         if not self.content:
@@ -95,7 +97,7 @@ class Page():
         if self.enumerate or self.enumerate_with_emoji:
             return [f"{itr+1} " for itr in range(len(self.content))]
         elif isinstance(self.prefix, list):
-            return self.prefix
+            return [f"{prefix} "for prefix in self.prefix]
         else:
             return [f"{self.prefix}{' ' * (self.prefix != '')}"] * len(self.content)
 
@@ -109,8 +111,6 @@ class Page():
         if self.title or self.description:
             head += "\n"
         content = head + str(self)
-        if self.footer:
-            content += f"\n\n*{self.footer}*"
         if self.display == 'block':
             content = f"```{content}```"
 
