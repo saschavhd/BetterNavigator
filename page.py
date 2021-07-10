@@ -47,7 +47,7 @@ class Page():
         elif isinstance(self.content, list):
             self.enlisted = True
         else:
-            raise TypeError("Required attribute content must be of type string ",
+            raise TypeError("Required attribute content must be of type string " +
             f"or list. Not {type(self.content)}")
 
         # Header and footer information
@@ -195,6 +195,8 @@ class EmbeddedPage(Page):
                 for itr, entry in enumerate(self.content):
                     embed.add_field(name=self._prefix[itr], value=entry, inline=self.inline)
             else:
+                if not embed.description:
+                    embed.description=" "
                 embed.description += f"\n\n{str(self)}"
 
         if self.footer: embed.set_footer(text=self.footer)

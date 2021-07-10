@@ -95,10 +95,10 @@ class Menu():
         self.channel = channel
 
         # Page options
-        self.page_options = kwargs
+        self.options = kwargs
 
-        self.overwrite_page_options = kwargs.get('overwrite_all', False)
-        self.fill_page_options = kwargs.get('fill_all', True)
+        self.overwrite_options = kwargs.get('overwrite_all', False)
+        self.fill_options = kwargs.get('fill_all', True)
 
         self.all_embedded = kwargs.get('all_embedded', False)
 
@@ -172,8 +172,8 @@ class Menu():
     def current_embed(self) -> discord.Embed:
         if isinstance(self.current_page, EmbeddedPage):
             embed = self.current_page.embed
-            if self.current_page.footer:
-                embed.set_footer(text=self.current_page.footer)
+            if self._footer:
+                embed.set_footer(text=self._footer)
             return embed
         else:
             return None
@@ -208,13 +208,13 @@ class Menu():
         '''
 
         if isinstance(page, Page):
-            for attribute, value in self.page_options.items():
-                if self.overwrite_page_options:
+            for attribute, value in self.options.items():
+                if self.overwrite_options:
                     try:
                         setattr(page, attribute, value)
                     except AttributeError:
                         pass
-                elif self.fill_page_options:
+                elif self.fill_options:
                     try:
                         if not getattr(page, attribute, value):
                             setattr(page, attribute, value)
@@ -223,9 +223,9 @@ class Menu():
 
         elif isinstance(page, (str, list)):
             if self.all_embedded:
-                page = EmbeddedPage(content=page, **self.page_options)
+                page = EmbeddedPage(content=page, **self.options)
             else:
-                page = Page(content=page, **self.page_options)
+                page = Page(content=page, **self.options)
         else:
             raise TypeError("Items in required attribute `pages` must all be of type Page, str or list.")
         return page
@@ -339,10 +339,11 @@ class Menu():
             await self.message.edit(content=content, embed=embed)
 
         # Add buttons to message
+        if self.selectors:
+            for selector in self.selectors:
+                await self.message.add_reaction(selector)
+
         if self.show_buttons:
-            if self.selectors:
-                for selector in self.selectors:
-                    await self.message.add_reaction(selector)
 
             if self._show_nav_buttons:
                 for button in self._buttons['navigation']:
@@ -373,10 +374,16 @@ class Menu():
                     tasks.append(
                         asyncio.create_task(self.bot.wait_for('raw_reaction_add', check=self.reaction_input))
                     )
+                    tasks.append(
+                        asyncio.create_task(self.bot.wait_for('raw_reaction_remove', check=self.reaction_input))
+                    )
 
                 if self.selectors:
                     tasks.append(
                         asyncio.create_task(self.bot.wait_for('raw_reaction_add', check=self._check_selector))
+                    )
+                    tasks.append(
+                        asyncio.create_task(self.bot.wait_for('raw_reaction_remove', check=self._check_selector))
                     )
 
                 done, pending = await asyncio.wait(
